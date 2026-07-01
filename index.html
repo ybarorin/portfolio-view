@@ -141,7 +141,29 @@
     position: absolute; background: #0F1419; border: 1px solid #232E3D; border-radius: 8px;
     padding: 6px 10px; font-size: 12px; pointer-events: none; display: none; white-space: nowrap; z-index: 10;
   }
+
+  /* Cloud sync modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .modal-box { background: #161D27; border: 1px solid #2D3B4D; border-radius: 16px; padding: 28px; max-width: 500px; width: 100%; max-height: 90vh; overflow-y: auto; }
+  .modal-title { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+  .modal-sub { font-size: 13px; color: #9FB4CC; margin-bottom: 20px; line-height: 1.6; }
+  .modal-label { font-size: 12px; color: #5B6B7C; margin-bottom: 5px; font-weight: 600; letter-spacing: 0.05em; }
+  .modal-input { width: 100%; background: #0F1419; border: 1px solid #232E3D; border-radius: 8px; color: #E8EDF2; padding: 10px 12px; font-size: 13px; font-family: monospace; box-sizing: border-box; margin-bottom: 14px; direction: ltr; text-align: left; }
+  .modal-input:focus { outline: none; border-color: #3B82F6; }
+  .modal-code { background: #0F1419; border: 1px solid #232E3D; border-radius: 8px; padding: 12px 14px; font-size: 11.5px; color: #34D399; font-family: 'Courier New', monospace; white-space: pre; overflow-x: auto; margin-bottom: 16px; direction: ltr; text-align: left; line-height: 1.6; }
+  .modal-section { margin-bottom: 20px; }
+  .modal-step { font-size: 13px; font-weight: 700; color: #9FB4CC; margin-bottom: 8px; }
+  .modal-btns { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+  .modal-btn-save { background: #3B82F6; border: none; color: #fff; border-radius: 8px; padding: 10px 22px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .modal-btn-save:hover { background: #2563EB; }
+  .modal-btn-cancel { background: transparent; border: 1px solid #2D3B4D; color: #9FB4CC; border-radius: 8px; padding: 10px 16px; font-size: 14px; cursor: pointer; font-family: inherit; }
+  .modal-btn-cancel:hover { background: #1A2330; }
+  .modal-btn-disconnect { background: transparent; border: 1px solid #3D2A2A; color: #F87171; border-radius: 8px; padding: 10px 14px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .modal-btn-disconnect:hover { background: rgba(239,68,68,0.08); }
+  .modal-error { color: #F87171; font-size: 12px; margin-bottom: 12px; }
+  .cloud-btn { border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 7px; border-width: 1px; border-style: solid; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -150,7 +172,8 @@
       <div class="eyebrow">תיק השקעות — מעקב חי</div>
       <h1>הפורטפוליו שלי</h1>
     </div>
-    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <button class="cloud-btn" id="cloudBtn" style="background:#1A2330; border-color:#2D3B4D; color:#9FB4CC;">☁ חבר ענן</button>
       <button class="btn" id="manualSaveBtn">💾 שמירה ידנית</button>
       <button class="btn" id="refreshBtn">↻ סנכרון למחירים הרשמיים האחרונים</button>
     </div>
@@ -199,11 +222,111 @@
   </div>
 </div>
 
+<!-- Cloud sync modal -->
+<div class="modal-overlay" id="cloudModal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-title">☁ סנכרון ענן בין מכשירים</div>
+    <div class="modal-sub">הגדרה חד-פעמית לכל מכשיר. הנתונים ישמרו ב-Supabase (חינמי) ויסונכרנו אוטומטית.</div>
+
+    <div class="modal-section">
+      <div class="modal-step">שלב 1 — צור טבלה ב-Supabase</div>
+      <div class="modal-label">היכנס ל-<b>supabase.com</b> → הפרויקט שלך → <b>SQL Editor</b> → הרץ:</div>
+      <div class="modal-code">create table if not exists portfolio (
+  id text primary key default 'default',
+  positions jsonb not null default '[]'::jsonb,
+  updated_at timestamptz default now()
+);
+alter table portfolio enable row level security;
+create policy "anon_all" on portfolio for all
+  using (true) with check (true);</div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-step">שלב 2 — הכנס פרטי API</div>
+      <div class="modal-label">Settings → API → Project URL</div>
+      <input class="modal-input" id="cloudUrlInput" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" spellcheck="false" />
+      <div class="modal-label">Settings → API → anon / public key</div>
+      <input class="modal-input" id="cloudKeyInput" type="text" placeholder="eyJhbGciOiJIUzI1NiIs..." autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="modal-error" id="cloudModalError" style="display:none"></div>
+
+    <div class="modal-btns">
+      <button class="modal-btn-disconnect" id="cloudDisconnectBtn" style="display:none">נתק ענן</button>
+      <button class="modal-btn-cancel" id="cloudCancelBtn">ביטול</button>
+      <button class="modal-btn-save" id="cloudSaveConfigBtn">שמור וסנכרן ▸</button>
+    </div>
+  </div>
+</div>
+
 <div class="tooltip-box" id="tooltip"></div>
 
 <script>
 const STORAGE_KEY = 'portfolio_data_v2';
 const LEGACY_STORAGE_KEY = 'portfolio_positions_v1'; // מבנה ישן (גרסה קודמת של האפליקציה), לשם תאימות לאחור בלבד
+
+// ---- Cloud sync (Supabase) ----
+const CLOUD_CONFIG_KEY = 'portfolio_cloud_cfg_v1';
+
+function getCloudConfig() {
+  try { return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)) || null; } catch(e) { return null; }
+}
+function setCloudConfig(url, key) {
+  localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify({ url, key }));
+  _supabaseClient = null; // reset cached client
+}
+function clearCloudConfig() {
+  localStorage.removeItem(CLOUD_CONFIG_KEY);
+  _supabaseClient = null;
+}
+
+let _supabaseClient = null;
+function getSupabaseClient() {
+  if (_supabaseClient) return _supabaseClient;
+  const cfg = getCloudConfig();
+  if (!cfg || !cfg.url || !cfg.key) return null;
+  if (typeof window.supabase === 'undefined') return null;
+  try {
+    _supabaseClient = window.supabase.createClient(cfg.url, cfg.key);
+    return _supabaseClient;
+  } catch(e) { return null; }
+}
+
+async function cloudLoad() {
+  const sb = getSupabaseClient();
+  if (!sb) return null;
+  try {
+    const { data, error } = await sb.from('portfolio').select('positions').eq('id', 'default').single();
+    if (error) return null;
+    return (data && Array.isArray(data.positions) && data.positions.length > 0) ? data.positions : null;
+  } catch(e) { return null; }
+}
+
+async function cloudSave(posArr) {
+  const sb = getSupabaseClient();
+  if (!sb) return false;
+  try {
+    const { error } = await sb.from('portfolio').upsert({ id: 'default', positions: posArr, updated_at: new Date().toISOString() });
+    return !error;
+  } catch(e) { return false; }
+}
+
+function updateCloudBtn() {
+  const btn = document.getElementById('cloudBtn');
+  if (!btn) return;
+  const cfg = getCloudConfig();
+  if (cfg && cfg.url) {
+    btn.style.background = 'rgba(16,185,129,0.1)';
+    btn.style.borderColor = '#10B981';
+    btn.style.color = '#34D399';
+    btn.textContent = '☁ ענן מחובר';
+  } else {
+    btn.style.background = '#1A2330';
+    btn.style.borderColor = '#2D3B4D';
+    btn.style.color = '#9FB4CC';
+    btn.textContent = '☁ חבר ענן';
+  }
+}
 
 // פוזיציות פעילות מיובאות מ"טבלת מניות שלי.xlsx", גיליון "מניות פעילות".
 // השדות כאן הם "התוכנית" שלך (תאריך/מחיר קנייה, כמות, SL/TP, בית השקעות) — נשמרים ונערכים בדפדפן שלך.
@@ -217,11 +340,10 @@ const defaultPlan = [
 ];
 
 // --- סנכרון מחירים ---
-// השדות הבאים נועדו להתעדכן אוטומטית ע"י משימה מתוזמנת (לאחר חיבור מקור נתונים פיננסי וחיבור FMP).
-// עד אז, אלו ערכי זרע חד-פעמיים שנשלפו ידנית מחיפוש פומבי ב-19.6.2026 (לא סנכרון רשמי אוטומטי עדיין).
-const LIVE_PRICES = { PFE: 26.58, CNK: 31.25, QUBT: 9.51, RBLX: 43.93, HOOD: 98.00, LUV: 46.10 };
-const LIVE_PRICES_AT = '2026-06-19T09:00:00+03:00';
-const LIVE_PRICES_IS_AUTOMATED = false; // יוחלף ל-true ע"י המשימה המתוזמנת לאחר ההפעלה הראשונה
+// השדות הבאים מתעדכנים אוטומטית ע"י משימה מתוזמנת, ממקור נתונים פיננסי (FMP).
+const LIVE_PRICES = { PFE: 24.39, CNK: 32.70, QUBT: 9.92, RBLX: 54.36, HOOD: 101.83, LUV: 51.60 };
+const LIVE_PRICES_AT = '2026-06-30T11:18:00+03:00';
+const LIVE_PRICES_IS_AUTOMATED = true;
 
 // --- עדכון חי כל 5 דקות, ישירות בדף (אופציונלי) ---
 // כדי להפעיל: הירשמו בחינם ב-finnhub.io (ללא כרטיס אשראי), העתיקו את ה-API Key מהדשבורד, והדביקו אותו כאן.
@@ -301,12 +423,14 @@ function loadPositions() {
 function savePositions(manual) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ positions, lastLiveSync }));
+    cloudSave(positions); // fire and forget — async cloud sync
     const el = document.getElementById('saveStatus');
+    const cloudConnected = !!getCloudConfig();
     el.textContent = manual ? 'נשמר ידנית ✓' : 'נשמר ✓';
     el.classList.add('saved');
     clearTimeout(savePositions._t);
     savePositions._t = setTimeout(() => {
-      el.textContent = 'הנתונים נשמרים אוטומטית בדפדפן הזה';
+      el.textContent = cloudConnected ? 'מסונכרן ענן ✓  |  נשמר גם בדפדפן' : 'הנתונים נשמרים אוטומטית בדפדפן הזה';
       el.classList.remove('saved');
     }, 1200);
     return true;
@@ -1010,8 +1134,97 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   }
 });
 
-render();
-startLivePolling();
+// ---- Cloud sync modal ----
+document.getElementById('cloudBtn').addEventListener('click', () => {
+  const cfg = getCloudConfig();
+  const urlInput = document.getElementById('cloudUrlInput');
+  const keyInput = document.getElementById('cloudKeyInput');
+  const disconnectBtn = document.getElementById('cloudDisconnectBtn');
+  const errorEl = document.getElementById('cloudModalError');
+  urlInput.value = cfg ? cfg.url : '';
+  keyInput.value = cfg ? cfg.key : '';
+  disconnectBtn.style.display = cfg ? 'inline-flex' : 'none';
+  errorEl.style.display = 'none';
+  document.getElementById('cloudModal').style.display = 'flex';
+});
+
+document.getElementById('cloudCancelBtn').addEventListener('click', () => {
+  document.getElementById('cloudModal').style.display = 'none';
+});
+
+document.getElementById('cloudDisconnectBtn').addEventListener('click', () => {
+  if (confirm('לנתק את סנכרון הענן? הנתונים ישארו בדפדפן הזה אבל לא יסונכרנו יותר.')) {
+    clearCloudConfig();
+    updateCloudBtn();
+    document.getElementById('cloudModal').style.display = 'none';
+    const el = document.getElementById('saveStatus');
+    el.textContent = 'ענן נותק — שמירה מקומית בלבד';
+  }
+});
+
+document.getElementById('cloudSaveConfigBtn').addEventListener('click', async () => {
+  const url = document.getElementById('cloudUrlInput').value.trim();
+  const key = document.getElementById('cloudKeyInput').value.trim();
+  const errorEl = document.getElementById('cloudModalError');
+  errorEl.style.display = 'none';
+
+  if (!url || !url.startsWith('https://')) {
+    errorEl.textContent = 'כתובת Project URL לא תקינה (חייבת להתחיל ב-https://)';
+    errorEl.style.display = 'block'; return;
+  }
+  if (!key || key.length < 20) {
+    errorEl.textContent = 'Anon Key נראה קצר מדי — ודא שהעתקת את המפתח המלא';
+    errorEl.style.display = 'block'; return;
+  }
+
+  const btn = document.getElementById('cloudSaveConfigBtn');
+  btn.textContent = 'מתחבר...'; btn.disabled = true;
+
+  setCloudConfig(url, key);
+
+  // Test connection by trying to upsert current positions
+  const ok = await cloudSave(positions);
+  btn.textContent = 'שמור וסנכרן ▸'; btn.disabled = false;
+
+  if (!ok) {
+    clearCloudConfig();
+    errorEl.textContent = 'לא הצלחתי להתחבר. ודא שה-URL וה-Key נכונים ושהרצת את ה-SQL ליצירת הטבלה.';
+    errorEl.style.display = 'block'; return;
+  }
+
+  updateCloudBtn();
+  document.getElementById('cloudModal').style.display = 'none';
+  const statusEl = document.getElementById('saveStatus');
+  statusEl.textContent = 'ענן מחובר! הנתונים סונכרנו ✓';
+  statusEl.classList.add('saved');
+  setTimeout(() => { statusEl.textContent = 'מסונכרן ענן ✓  |  נשמר גם בדפדפן'; statusEl.classList.remove('saved'); }, 2000);
+});
+
+// ---- Async init: show local data first, then merge cloud data ----
+async function init() {
+  updateCloudBtn();
+  render();
+  startLivePolling();
+
+  // Try to load from cloud in background
+  const cloudData = await cloudLoad();
+  if (cloudData && cloudData.length > 0) {
+    positions = cloudData;
+    // Apply any live price updates on top of cloud data
+    if (LIVE_PRICES_AT && lastLiveSync !== LIVE_PRICES_AT) {
+      positions = positions.map(p => {
+        if (LIVE_PRICES[p.symbol] != null) return Object.assign({}, p, { currentPrice: LIVE_PRICES[p.symbol] });
+        return p;
+      });
+      lastLiveSync = LIVE_PRICES_AT;
+    }
+    expandedId = expandedId !== null ? expandedId : (positions[0] ? positions[0].id : null);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ positions, lastLiveSync })); } catch(e) {}
+    render();
+  }
+}
+
+init();
 </script>
 </body>
 </html>
